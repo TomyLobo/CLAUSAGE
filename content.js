@@ -382,6 +382,89 @@
     }, 1000);
   }
 
+  // ── Window elapsed percentage helpers ──
+  // These derive time elapsed from Claude's human-readable reset text.
+  // Deliberately no clamping: values outside 0-100% should remain visible,
+  // because they indicate a parser/window-semantics/rounding mismatch.
+  function parseRelativeResetMs(resetInfo) {
+    var m = (resetInfo || '').match(/^Resets\s+in\s+(?:(\d+)\s*d(?:ay)?s?\s*)?(?:(\d+)\s*h(?:r|our)?s?\s*)?(?:(\d+)\s*m(?:in|inute)?s?\s*)?$/i);
+    if (!m) return null;
+    var days = parseInt(m[1] || '0', 10);
+    var hours = parseInt(m[2] || '0', 10);
+    var minutes = parseInt(m[3] || '0', 10);
+    if (!days && !hours && !minutes) return null;
+    return (((days * 24) + hours) * 60 + minutes) * 60 * 1000;
+  }
+
+  function parseNextWeeklyResetMs(resetInfo, now) {
+    var m = (resetInfo || '').match(/^Resets\s+(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i);
+    if (!m) return null;
+
+    var weekdayIndex = {
+      sun: 0,
+      mon: 1,
+      tue: 2,
+      wed: 3,
+      thu: 4,
+      fri: 5,
+      sat: 6
+    };
+
+    var targetDay = weekdayIndex[m[1].toLowerCase()];
+    var hour = parseInt(m[2], 10);
+    var minute = parseInt(m[3], 10);
+    var ampm = m[4] ? m[4].toUpperCase() : null;
+
+    if (ampm) {
+      if (hour < 1 || hour > 12) return null;
+      if (ampm === 'AM') hour = hour === 12 ? 0 : hour;
+      if (ampm === 'PM') hour = hour === 12 ? 12 : hour + 12;
+    } else if (hour > 23) {
+      return null;
+    }
+
+    if (minute > 59) return null;
+
+    var target = new Date(now.getTime());
+    var daysAhead = (targetDay - now.getDay() + 7) % 7;
+
+    target.setDate(now.getDate() + daysAhead);
+    target.setHours(hour, minute, 0, 0);
+
+    // Always use the next occurrence of that weekday/time.
+    if (target.getTime() <= now.getTime()) {
+      target.setDate(target.getDate() + 7);
+    }
+
+    return target.getTime() - now.getTime();
+  }
+
+  function getWindowElapsedPct(label, resetInfo, now) {
+    var remainingMs = null;
+    var windowMs = null;
+
+    if (/^current session$/i.test((label || '').trim())) {
+      windowMs = 5 * 60 * 60 * 1000;
+      remainingMs = parseRelativeResetMs(resetInfo);
+    } else if (/^all models$/i.test((label || '').trim())) {
+      windowMs = 7 * 24 * 60 * 60 * 1000;
+      remainingMs = parseNextWeeklyResetMs(
+        resetInfo,
+        now || new Date()
+      );
+    }
+
+    if (remainingMs === null || windowMs === null) {
+      return null;
+    }
+
+    return (1 - (remainingMs / windowMs)) * 100;
+  }
+
+  function formatWindowElapsedPct(pct) {
+    return pct === null ? '' : Math.round(pct) + '%';
+  }
+
   // ── Shorten reset info for narrow mode ──
   function shortenReset(s) {
     return (s || '')
@@ -446,6 +529,14 @@
       var barColor = barWidth >= 90 ? '#ef4444' : barWidth >= 70 ? '#f59e0b' : '#6b8afd';
       var shortR = shortenReset(s.resetInfo);
       var shortLbl = shortenLabel(s.label);
+
+      var elapsedPct =
+        s.type === 'pct'
+          ? getWindowElapsedPct(s.label, s.resetInfo, new Date())
+          : null;
+
+      var elapsedText = formatWindowElapsedPct(elapsedPct);
+
       html +=
         '<div class="cuw-row">' +
           '<div class="cuw-row-top">' +
@@ -460,8 +551,13 @@
           '</div>' +
           (s.resetInfo
             ? '<div class="cuw-reset">' +
-                '<span class="cuw-reset-full">' + escapeHtml(s.resetInfo) + '</span>' +
-                '<span class="cuw-reset-short">' + escapeHtml(shortR) + '</span>' +
+                '<span class="cuw-reset-text">' +
+                  '<span class="cuw-reset-full">' + escapeHtml(s.resetInfo) + '</span>' +
+                  '<span class="cuw-reset-short">' + escapeHtml(shortR) + '</span>' +
+                '</span>' +
+                (elapsedText
+                  ? '<span class="cuw-time-pct">' + escapeHtml(elapsedText) + '</span>'
+                  : '') +
               '</div>'
             : '') +
         '</div>';

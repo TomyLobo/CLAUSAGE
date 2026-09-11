@@ -182,9 +182,25 @@
 }
 
 .cuw-reset {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
   font-size: 10px;
   color: #999;
   margin-top: 2px;
+}
+
+.cuw-reset-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cuw-time-pct {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Default: only full reset label is shown */
